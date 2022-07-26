@@ -2,13 +2,17 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"github.com/ungerik/go-dry"
+	"io/ioutil"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 )
 
 var actions = []string{"logged in", "logged out", "created record", "deleted record", "updated account"}
+
+var startTime time.Time
 
 type logItem struct {
 	action    string
@@ -30,47 +34,79 @@ func (u User) getActivityInfo() string {
 	return output
 }
 
-func main() {
+func init() {
+	prepareDB()
 	rand.Seed(time.Now().Unix())
+	startTime = time.Now()
+}
 
-	startTime := time.Now()
+func main() {
+	const resultsCount, workersCount = 100, 100
 
-	users := generateUsers(100)
+	wg := &sync.WaitGroup{}
 
-	for _, user := range users {
-		saveUserInfo(user)
-	}
+	jobs := make(chan int, resultsCount)
+	users := make(chan User, resultsCount)
+
+	// generate users with the help of goroutines
+	generateUsers(workersCount, jobs, users)
+
+	// generate jobs for users
+	generateJobs(resultsCount, jobs, wg)
+
+	// wait for all users to be generated and save their info
+	saveUsersInfo(workersCount, users, wg)
+
+	wg.Wait()
 
 	fmt.Printf("DONE! Time Elapsed: %.2f seconds\n", time.Since(startTime).Seconds())
 }
 
-func saveUserInfo(user User) {
-	fmt.Printf("WRITING FILE FOR UID %d\n", user.id)
-
-	filename := fmt.Sprintf("users/uid%d.txt", user.id)
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		log.Fatal(err)
+func generateJobs(count int, jobs chan<- int, wg *sync.WaitGroup) {
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		jobs <- i
 	}
-
-	file.WriteString(user.getActivityInfo())
-	time.Sleep(time.Second)
 }
 
-func generateUsers(count int) []User {
-	users := make([]User, count)
-
-	for i := 0; i < count; i++ {
-		users[i] = User{
-			id:    i + 1,
-			email: fmt.Sprintf("user%d@company.com", i+1),
-			logs:  generateLogs(rand.Intn(1000)),
-		}
-		fmt.Printf("generated user %d\n", i+1)
-		time.Sleep(time.Millisecond * 100)
+func generateUsers(workersCount int, jobs <-chan int, users chan<- User) {
+	for i := 0; i < workersCount; i++ {
+		go func() {
+			for j := range jobs {
+				users <- User{
+					id:    j,
+					email: fmt.Sprintf("user%d@company.com", j),
+					logs:  generateLogs(rand.Intn(1000)),
+				}
+				fmt.Printf("generated user %d\n", j)
+				time.Sleep(time.Millisecond * 100)
+			}
+			close(users)
+		}()
 	}
+}
 
-	return users
+func saveUsersInfo(workersCount int, users chan User, wg *sync.WaitGroup) {
+	for i := 0; i < workersCount; i++ {
+		go func() {
+			for user := range users {
+				fmt.Printf("WRITING FILE FOR UID %d\n", user.id)
+
+				// create file
+				filename := fmt.Sprintf("users/uid%d.txt", user.id)
+				file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
+				dry.PanicIfErr(err)
+
+				_, err = file.WriteString(user.getActivityInfo())
+				dry.PanicIfErr(err)
+
+				time.Sleep(time.Second)
+
+				// wait for all users to be saved
+				wg.Done()
+			}
+		}()
+	}
 }
 
 func generateLogs(count int) []logItem {
@@ -84,4 +120,21 @@ func generateLogs(count int) []logItem {
 	}
 
 	return logs
+}
+
+func prepareDB() {
+	// check if folder exists
+	if _, err := os.Stat("users"); os.IsNotExist(err) {
+		err = os.Mkdir("users", 0755)
+		dry.PanicIfErr(err)
+	}
+
+	// delete existing files in users folder
+	files, err := ioutil.ReadDir("users")
+	dry.PanicIfErr(err)
+
+	for _, file := range files {
+		err = os.Remove("users/" + file.Name())
+		dry.PanicIfErr(err)
+	}
 }
