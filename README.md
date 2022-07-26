@@ -1,6 +1,4 @@
-# Refactor the concurrent write/read cache
-
-Code optimization with Worker Pool
+# Code optimization with Worker Pool
 
 # Tests
 | Number of workers for 100 items | Time    |
