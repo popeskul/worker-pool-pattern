@@ -10,9 +10,11 @@ import (
 	"time"
 )
 
-var actions = []string{"logged in", "logged out", "created record", "deleted record", "updated account"}
-
-var startTime time.Time
+var (
+	resultsCount, workersCount = 100, 100
+	actions                    = []string{"logged in", "logged out", "created record", "deleted record", "updated account"}
+	startTime                  time.Time
+)
 
 type logItem struct {
 	action    string
@@ -41,8 +43,6 @@ func init() {
 }
 
 func main() {
-	const resultsCount, workersCount = 100, 100
-
 	wg := &sync.WaitGroup{}
 
 	jobs := make(chan int, resultsCount)
